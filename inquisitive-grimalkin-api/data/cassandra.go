@@ -19,6 +19,13 @@ import (
 	"time"
 )
 
+type LikeAction int
+
+const (
+	Like LikeAction = iota
+	Dislike
+)
+
 var cassandraRemoteUri string
 var cassandraClientId string
 var cassandraClientSecret string
@@ -130,8 +137,8 @@ func init() {
 	log.Printf("successfully created all tables ")
 }
 
-func Foo() {
-	log.Printf("...")
+func NewCassandraQuestionsRepository() CassandraQuestionsRepository {
+	return CassandraQuestionsRepository{}
 }
 
 type CassandraQuestionsRepository struct {
@@ -252,6 +259,10 @@ func (c *CassandraQuestionsRepository) DeleteQandA(_ context.Context) error {
 	panic("not implemented") // TODO: Implement
 }
 
+func NewCassandraLikesRepository() CassandraLikesRepository {
+	return CassandraLikesRepository{}
+}
+
 type CassandraLikesRepository struct {
 }
 
@@ -295,12 +306,69 @@ func (c *CassandraLikesRepository) GetLikesForQAndA(ctx context.Context, qAndAId
 
 	return likes, nil
 }
-func (c *CassandraLikesRepository) LikeQAndA(_ context.Context, qAndAUuid uuid.UUID) error {
-	panic("not implemented") // TODO: Implement
+
+func (c *CassandraLikesRepository) LikeQAndA(ctx context.Context, qAndAUuid uuid.UUID) error {
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	q, err := updateLikesQuery(Like, qAndAUuid)
+	if err != nil {
+		return fmt.Errorf("failed to like the q&a %s\n", err)
+	}
+
+	/*
+	 * Resposne is deliberatly ignored because as per Cassandra Standard, inserted values do not get returned as part of response just like SQL
+	 */
+	_, err = cassandraClient.ExecuteQuery(q)
+	if err != nil {
+		return fmt.Errorf("failed to like the q&a %s\n", err)
+	}
+	
+	return nil
 }
 
-func (c *CassandraLikesRepository) UnlikeQAndA(_ context.Context, qAndAUuid uuid.UUID) error {
-	panic("not implemented") // TODO: Implement
+func (c *CassandraLikesRepository) UnlikeQAndA(ctx context.Context, qAndAUuid uuid.UUID) error {
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	q, err := updateLikesQuery(Dislike, qAndAUuid)
+	if err != nil {
+		return fmt.Errorf("failed to like the q&a %s\n", err)
+	}
+
+	/*
+	 * Resposne is deliberatly ignored because as per Cassandra Standard, inserted values do not get returned as part of response just like SQL
+	 */
+	_, err = cassandraClient.ExecuteQuery(q)
+	if err != nil {
+		return fmt.Errorf("failed to like the q&a %s\n", err)
+	}
+	
+	return nil
+}
+
+func updateLikesQuery(action LikeAction, uuid uuid.UUID) (*proto.Query, error) {
+	var q string
+	cassandraCompliantUuid, err := googleUuidToCassandraUuid(uuid)
+	if err != nil {
+		return nil, err
+	}
+
+	switch action {
+	case Like:
+		q = `UPDATE q_and_a_likes SET likes = likes + 1 WHERE question_id  = ?;`
+	case Dislike:	
+		q = `UPDATE q_and_a_likes SET likes = likes - 1 WHERE question_id  = ?;`
+	}
+
+	return &proto.Query{
+		Cql: q,
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				&proto.Value{&proto.Value_Uuid{cassandraCompliantUuid}},
+			},
+		},
+	}, nil
 }
 
 func cassandraUuidToGoogleUuid(v *proto.Value) (uuid.UUID, error) {
