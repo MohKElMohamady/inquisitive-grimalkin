@@ -1,7 +1,6 @@
 package data
 
 import (
-	//"context"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -11,8 +10,6 @@ import (
 	"os"
 	"sync"
 	"time"
-
-	//"github.com/google/uuid"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/stargate/stargate-grpc-go-client/stargate/pkg/auth"
@@ -140,11 +137,73 @@ func Foo() {
 type CassandraQuestionsRepository struct {
 }
 
-func (c *CassandraQuestionsRepository) GetUnansweredQuestions(_ context.Context) ([]models.Question, error) {
-	panic("not implemented") // TODO: Implement
+func (c *CassandraQuestionsRepository) GetUnansweredQuestionsForUser(_ context.Context, askedUser string) ([]models.Question, error) {
+	panic("not implemented") //TODO: implement
 }
 
 func (c *CassandraQuestionsRepository) Ask(ctx context.Context, q models.Question) (models.Question, error) {
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	err := utils.ValidateQuestion(q)
+	if err != nil {
+		return models.Question{}, fmt.Errorf("failed to validate the question %s", err)
+	}
+
+	generatedQuestionId, err := uuid.NewUUID()
+	if err != nil {
+		return models.Question{}, fmt.Errorf("failed to ask this question %s", err)
+	}
+	generatedQuestionIdInBytes, err := generatedQuestionId.MarshalBinary()
+	if err != nil {
+		return models.Question{}, fmt.Errorf("failed to ask this question %s", err)
+	}
+	cassandraCompliantQuestionUuid := &proto.Uuid{Value: generatedQuestionIdInBytes}
+
+	AskQuery := &proto.Query{Cql: `INSERT INTO main.questions_by_user (asked , question_id , asker , is_anon , question) 
+									VALUES (?, ?, ?, ?, ?);`,
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				{Inner: &proto.Value_String_{q.Asked}},
+				{Inner: &proto.Value_Uuid{cassandraCompliantQuestionUuid}},
+				{Inner: &proto.Value_String_{q.Asker}},
+				{Inner: &proto.Value_Boolean{q.IsAnon}},
+				{Inner: &proto.Value_String_{q.Question}},
+			},
+		},
+	}
+
+	/*
+	 * Resposne is deliberatly ignored because as per Cassandra Standard, inserted values do not get returned as part of response just like SQL
+	 */
+	_, err = cassandraClient.ExecuteQuery(AskQuery)
+	if err != nil {
+		return models.Question{}, err
+	}
+
+	persistedQuestion := models.Question{
+		QuestionId: generatedQuestionId,
+		Asked:      q.Asked,
+		Asker:      q.Asker,
+		IsAnon:     q.IsAnon,
+		Question:   q.Question,
+	}
+	log.Printf("successfully persisted the question %s at %s\n", persistedQuestion, time.Now())
+
+	return persistedQuestion, nil
+}
+
+/*
+ * Answering the question will have multiple steps:
+ * 1) Delete the question from the original the questions_by_user table.
+ * 2) Add the answered question in the Q&A question i.e. q_and_a_user 
+ * 3) Find the followers of that user and post it to their timelines i.e. 
+ * 	  Initial idea: Retrieve all the followers and the calculate their length i.e. number of followers, which a touch of concurreny, spawn number of goroutines
+      equal to the number of followers and then write to their timeline. (this might be a huge overhead if the user has large number of followers). Maybe 
+	  check the number of followers and try to rationalize i.e. distribute the actions of saving in the table depending on how big the followers are?
+ * 4) Since the counter tables do not allow insertion, we will just update the q&a of that like to be added and set to zero.
+ */
+func (c *CassandraQuestionsRepository) AnswerQuestion(_ context.Context, _ models.QAndA) (models.QAndA, error) {
 	panic("not implemented") // TODO: Implement
 }
 
@@ -156,17 +215,12 @@ func (c *CassandraQuestionsRepository) DeleteQandA(_ context.Context) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (c *CassandraQuestionsRepository) AnswerQuestion(_ context.Context, _ models.QAndA) (models.QAndA, error) {
-	panic("not implemented") // TODO: Implement
-}
-
 type CassandraLikesRepository struct {
 }
 
 func (c *CassandraLikesRepository) GetLikesForQAndA(ctx context.Context, qAndAId uuid.UUID) (int64, error) {
 	panic("not implemented") // TODO: Implement
 }
-
 func (c *CassandraLikesRepository) LikeQAndA(_ context.Context, qAndAUuid uuid.UUID) error {
 	panic("not implemented") // TODO: Implement
 }
