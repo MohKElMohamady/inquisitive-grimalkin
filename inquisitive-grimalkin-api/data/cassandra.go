@@ -255,8 +255,45 @@ func (c *CassandraQuestionsRepository) DeleteQandA(_ context.Context) error {
 type CassandraLikesRepository struct {
 }
 
+/*
+ * Later on when we fetch the answered questions of people who one user follows, we need to fetch the likes for each question, now this might be a little
+ * bit slow if we do it sequentially, but since we are going to use pagination with constant number of questions per "load more", this constant number will
+ * help us accelerate things a bit, where we can spawn a goroutine for each number of question that is loaded and we read the number of likes.
+ * This will substantially speed up the fetching of all the likes
+ */
 func (c *CassandraLikesRepository) GetLikesForQAndA(ctx context.Context, qAndAId uuid.UUID) (int64, error) {
-	panic("not implemented") // TODO: Implement
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+	cassandraCompliantUuid, err := googleUuidToCassandraUuid(qAndAId)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch the likes for a specific Q&A with id %s", qAndAId)
+	}
+	
+	fetchLikesForQAndAQuery := &proto.Query{
+		Cql: `SELECT * FROM main.q_and_a_likes`,
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				&proto.Value{&proto.Value_Uuid{cassandraCompliantUuid}},
+			},
+		},
+	}
+	res, err := cassandraClient.ExecuteQueryWithContext(fetchLikesForQAndAQuery, ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch likes for the q&a %s", err)
+	}
+
+	var likes int64 = 0
+	log.Printf("the total size of the result set is %v", len(res.GetResultSet().Rows))
+	for _, v := range res.GetResultSet().Rows {
+		log.Println("")
+		uuid, err := uuid.Parse(string(v.Values[0].GetUuid().Value))
+		if err != nil {
+			log.Fatalln(err)
+		}
+		log.Println(uuid)
+	}
+
+	return likes, nil
 }
 func (c *CassandraLikesRepository) LikeQAndA(_ context.Context, qAndAUuid uuid.UUID) error {
 	panic("not implemented") // TODO: Implement
