@@ -16,6 +16,14 @@ type QuestionsRepository interface {
 
 type LikesRepository interface {
 	GetLikesForQAndA(context.Context, uuid.UUID) (int64, error)
-	LikeQAndA(context.Context) error
-	UnlikeQAndA(context.Context) error
+	LikeQAndA(context.Context, uuid.UUID) error
+	UnlikeQAndA(context.Context, uuid.UUID) error
+}
+
+
+type UsersRepository interface {
+	Register(context.Context, models.User) (models.User ,error)
+	Login(context.Context, models.User) (models.User, error)
+	Delete(context.Context, models.User) (error)
+	UpdateLoginDetails(context.Context, models.User) (models.User, error)
 }
