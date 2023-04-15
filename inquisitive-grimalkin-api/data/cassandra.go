@@ -4,12 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"inquisitive-grimalkin/models"
-	"inquisitive-grimalkin/utils"
-	"log"
-	"os"
-	"sync"
-	"time"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/stargate/stargate-grpc-go-client/stargate/pkg/auth"
@@ -17,6 +11,12 @@ import (
 	"github.com/stargate/stargate-grpc-go-client/stargate/pkg/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"inquisitive-grimalkin/models"
+	"inquisitive-grimalkin/utils"
+	"log"
+	"os"
+	"sync"
+	"time"
 )
 
 var cassandraRemoteUri string
@@ -138,7 +138,44 @@ type CassandraQuestionsRepository struct {
 }
 
 func (c *CassandraQuestionsRepository) GetUnansweredQuestionsForUser(_ context.Context, askedUser string) ([]models.Question, error) {
-	panic("not implemented") //TODO: implement
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	if askedUser == "" {
+		return nil, fmt.Errorf("cannot fetch the unanswered questions for no one")
+	}
+
+	getUnAnsweredQuestionForUserQuery := &proto.Query{
+		Cql: "SELECT * FROM main.questions_by_user WHERE asked = ?",
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				{Inner: &proto.Value_String_{askedUser}},
+			},
+		},
+	}
+
+	res, err := cassandraClient.ExecuteQuery(getUnAnsweredQuestionForUserQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch unanswered questions for %s %s", askedUser, err)
+	}
+
+	unansweredQuestions := []models.Question{}
+	for _, row := range res.GetResultSet().Rows {
+		parsedQuestionUuid, err := cassandraUuidToGoogleUuid(row.Values[1]) 
+		if err != nil {
+			log.Printf("failed to parse the uuid of one question %s\n ", err)
+		}
+		q := models.Question{
+			QuestionId: parsedQuestionUuid,
+			Asked:      row.Values[0].GetString_(),
+			Asker:      row.Values[2].GetString_(),
+			IsAnon:     row.Values[3].GetBoolean(),
+			Question:   row.Values[4].GetString_(),
+		}
+		unansweredQuestions = append(unansweredQuestions, q)
+	}
+
+	return unansweredQuestions, nil
 }
 
 func (c *CassandraQuestionsRepository) Ask(ctx context.Context, q models.Question) (models.Question, error) {
@@ -154,18 +191,18 @@ func (c *CassandraQuestionsRepository) Ask(ctx context.Context, q models.Questio
 	if err != nil {
 		return models.Question{}, fmt.Errorf("failed to ask this question %s", err)
 	}
-	generatedQuestionIdInBytes, err := generatedQuestionId.MarshalBinary()
+
+	cassandraCompliantUuid, err := googleUuidToCassandraUuid(generatedQuestionId)
 	if err != nil {
-		return models.Question{}, fmt.Errorf("failed to ask this question %s", err)
+		return models.Question{}, fmt.Errorf("failed to ask this question %s, try again later", err)
 	}
-	cassandraCompliantQuestionUuid := &proto.Uuid{Value: generatedQuestionIdInBytes}
 
 	AskQuery := &proto.Query{Cql: `INSERT INTO main.questions_by_user (asked , question_id , asker , is_anon , question) 
 									VALUES (?, ?, ?, ?, ?);`,
 		Values: &proto.Values{
 			Values: []*proto.Value{
 				{Inner: &proto.Value_String_{q.Asked}},
-				{Inner: &proto.Value_Uuid{cassandraCompliantQuestionUuid}},
+				{Inner: &proto.Value_Uuid{cassandraCompliantUuid}},
 				{Inner: &proto.Value_String_{q.Asker}},
 				{Inner: &proto.Value_Boolean{q.IsAnon}},
 				{Inner: &proto.Value_String_{q.Question}},
@@ -194,15 +231,15 @@ func (c *CassandraQuestionsRepository) Ask(ctx context.Context, q models.Questio
 }
 
 /*
- * Answering the question will have multiple steps:
- * 1) Delete the question from the original the questions_by_user table.
- * 2) Add the answered question in the Q&A question i.e. q_and_a_user 
- * 3) Find the followers of that user and post it to their timelines i.e. 
- * 	  Initial idea: Retrieve all the followers and the calculate their length i.e. number of followers, which a touch of concurreny, spawn number of goroutines
-      equal to the number of followers and then write to their timeline. (this might be a huge overhead if the user has large number of followers). Maybe 
-	  check the number of followers and try to rationalize i.e. distribute the actions of saving in the table depending on how big the followers are?
- * 4) Since the counter tables do not allow insertion, we will just update the q&a of that like to be added and set to zero.
- */
+  - Answering the question will have multiple steps:
+  - 1) Delete the question from the original the questions_by_user table.
+  - 2) Add the answered question in the Q&A question i.e. q_and_a_user
+  - 3) Find the followers of that user and post it to their timelines i.e.
+  - Initial idea: Retrieve all the followers and the calculate their length i.e. number of followers, which a touch of concurreny, spawn number of goroutines
+    equal to the number of followers and then write to their timeline. (this might be a huge overhead if the user has large number of followers). Maybe
+    check the number of followers and try to rationalize i.e. distribute the actions of saving in the table depending on how big the followers are?
+  - 4) Since the counter tables do not allow insertion, we will just update the q&a of that like to be added and set to zero.
+*/
 func (c *CassandraQuestionsRepository) AnswerQuestion(_ context.Context, _ models.QAndA) (models.QAndA, error) {
 	panic("not implemented") // TODO: Implement
 }
@@ -227,4 +264,22 @@ func (c *CassandraLikesRepository) LikeQAndA(_ context.Context, qAndAUuid uuid.U
 
 func (c *CassandraLikesRepository) UnlikeQAndA(_ context.Context, qAndAUuid uuid.UUID) error {
 	panic("not implemented") // TODO: Implement
+}
+
+func cassandraUuidToGoogleUuid(v *proto.Value) (uuid.UUID, error) {
+	id := v.GetUuid().Value
+	parsedQuestionUuid, err := uuid.FromBytes(id)
+	if err != nil {
+		return uuid.UUID{}, fmt.Errorf("failed to parse the uuid of one question %s\n ", err)
+	}
+	return parsedQuestionUuid, nil
+}
+
+func googleUuidToCassandraUuid(id uuid.UUID) (*proto.Uuid, error) {
+	generatedQuestionIdInBytes, err := id.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert the google id to cassandra id %s", err)
+	}
+	cassandraCompliantQuestionUuid := &proto.Uuid{Value: generatedQuestionIdInBytes}
+	return cassandraCompliantQuestionUuid, nil
 }
