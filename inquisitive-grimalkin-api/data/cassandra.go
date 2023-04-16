@@ -241,14 +241,73 @@ func (c *CassandraQuestionsRepository) Ask(ctx context.Context, q models.Questio
   - Answering the question will have multiple steps:
   - 1) Delete the question from the original the questions_by_user table.
   - 2) Add the answered question in the Q&A question i.e. q_and_a_user
-  - 3) Find the followers of that user and post it to their timelines i.e.
+  - 3) Find the followers of that user and post it to their timelines i.e. search for all the followers of the asked person and post save in their
+	   q_and_a_follower table
   - Initial idea: Retrieve all the followers and the calculate their length i.e. number of followers, which a touch of concurreny, spawn number of goroutines
     equal to the number of followers and then write to their timeline. (this might be a huge overhead if the user has large number of followers). Maybe
     check the number of followers and try to rationalize i.e. distribute the actions of saving in the table depending on how big the followers are?
   - 4) Since the counter tables do not allow insertion, we will just update the q&a of that like to be added and set to zero.
 */
-func (c *CassandraQuestionsRepository) AnswerQuestion(_ context.Context, _ models.QAndA) (models.QAndA, error) {
-	panic("not implemented") // TODO: Implement
+func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, qAndA models.QAndA) (models.QAndA, error) {
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	cassandraCompliantQAndAUuid, err := googleUuidToCassandraUuid(qAndA.QuestionId)
+	if err != nil {
+		return models.QAndA{}, fmt.Errorf("failed to answer the question and parsing the uuid %s", err) 
+	}
+
+	// Step 1 delete the question without an answer from its table
+	deleteTheQuestionWithoutAnswerQuery := `delete FROM questions_by_user WHERE asked = ? AND question_id = ?;`
+	_, err = cassandraClient.ExecuteQuery(&proto.Query{
+		Cql: deleteTheQuestionWithoutAnswerQuery,
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				&proto.Value{&proto.Value_String_{qAndA.Asked}},
+				&proto.Value{&proto.Value_Uuid{cassandraCompliantQAndAUuid}},
+			},
+		},
+	})
+	if err != nil {
+		return models.QAndA{}, fmt.Errorf("failed to answer the question, unable to delete the question before reposting %s")
+	}
+	
+	qAndAUuid, err := uuid.NewUUID()
+	if err != nil {
+		return models.QAndA{}, fmt.Errorf("failed to generate new uuid for answer to question%s", err)
+	}
+
+	cassandraCompliantQAndAUuid, err = googleUuidToCassandraUuid(qAndAUuid)
+	if err != nil {
+		return models.QAndA{}, fmt.Errorf("failed to parse a cassandra compliant uuid for the answer %s", err)
+	}
+
+	// Step 2 insert the q&a into the table that will appear to the asked person
+	insertAnsweredQuestionQuery := `insert INTO main.q_and_a_users 
+									(asked , question_id , answer , asker , is_anon , question ) 
+									VALUES (?, ? ,?, ?, ?, ?);`
+	_, err = cassandraClient.ExecuteQuery(&proto.Query{
+		Cql: insertAnsweredQuestionQuery,
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				{&proto.Value_String_{qAndA.Asked}},
+				{&proto.Value_Uuid{cassandraCompliantQAndAUuid}},
+				{&proto.Value_String_{qAndA.Answer}},
+				{&proto.Value_String_{qAndA.Asker}},
+				{&proto.Value_Boolean{qAndA.IsAnon}},
+				{&proto.Value_String_{qAndA.Question}},
+			},
+		},
+	})
+	if err != nil {
+		return models.QAndA{}, fmt.Errorf("failed to save the answer to the question %s", err)
+	}
+
+	// TODO: Step 3 post all the answer to the asked's followers
+
+	// TODO : Step 4 Add the Q&A to the likes counter table 
+
+	return qAndA, nil
 }
 
 func (c *CassandraQuestionsRepository) UpdateAnswer(_ context.Context, _ models.Question) ([]models.Question, error) {
@@ -305,6 +364,29 @@ func (c *CassandraLikesRepository) GetLikesForQAndA(ctx context.Context, qAndAId
 	}
 
 	return likes, nil
+}
+
+func (c *CassandraLikesRepository) CreateLikesEntryForQAndA(context context.Context, qAndAId uuid.UUID) (int64, error) {
+
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	cassandraCompliantQAndAUuid, err := googleUuidToCassandraUuid(qAndAId)
+	if err != nil {
+		return 0, fmt.Errorf("failed to insert the Q&A to the likes counter table %s", err)
+	}
+
+	addQAndAToLikesQuery := `update q_and_a_likes SET likes = likes + 0 WHERE question_id = ?;`	
+	cassandraClient.ExecuteQuery(&proto.Query{
+		Cql: addQAndAToLikesQuery,
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				{&proto.Value_Uuid{cassandraCompliantQAndAUuid}},
+			},
+		},
+	})
+	return 0, nil
+
 }
 
 func (c *CassandraLikesRepository) LikeQAndA(ctx context.Context, qAndAUuid uuid.UUID) error {
