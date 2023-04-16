@@ -3,12 +3,15 @@ package routers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"inquisitive-grimalkin/data"
 	"inquisitive-grimalkin/models"
 	"io"
 	"log"
 	"net/http"
+
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 type QuestionsRouter struct {
@@ -29,7 +32,7 @@ func NewQuestionsRouter() QuestionsRouter {
 	r.Get("/", questionsRouter.GetUnansweredQuestions())
 	r.Post("/", questionsRouter.Ask())
 
-	r.Post("/{question_id}/", questionsRouter.AnswerQuestion())
+	r.Post("/{question_id}/answer/", questionsRouter.AnswerQuestion())
 	r.Put("/{question_id}/", questionsRouter.UpdateAnswer())
 	r.Delete("/{question_id}", questionsRouter.DeleteQAndA())
 
@@ -45,7 +48,6 @@ func NewQuestionsRouter() QuestionsRouter {
 
 func (r *QuestionsRouter) GetUnansweredQuestions() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
 	}
 }
 
@@ -100,7 +102,7 @@ func (r *QuestionsRouter) DeleteQAndA() http.HandlerFunc {
 	}
 }
 
-func (r *QuestionsRouter) AnswerQuestion() http.HandlerFunc {
+func (router *QuestionsRouter) AnswerQuestion() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 	}
@@ -112,15 +114,31 @@ func (r *QuestionsRouter) GetLikesForQAndA() http.HandlerFunc {
 	}
 }
 
-func (r *QuestionsRouter) LikeQAndA() http.HandlerFunc {
+func (router *QuestionsRouter) LikeQAndA() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
+		questionId := chi.URLParam(r, "question_id")	
+		questionUuid := uuid.MustParse(questionId)
+		err := router.likesRepository.LikeQAndA(context.TODO(), questionUuid)	
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprintf("failed to like answer with id %s %s", questionId, err)))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
-func (r *QuestionsRouter) UnlikeQAndA() http.HandlerFunc {
+func (router *QuestionsRouter) UnlikeQAndA() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
+		questionId := chi.URLParam(r, "question_id")	
+		questionUuid := uuid.MustParse(questionId)
+		err := router.likesRepository.UnlikeQAndA(context.TODO(), questionUuid)	
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprintf("failed to like answer with id %s %s", questionId, err)))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
