@@ -103,14 +103,21 @@ func (r *QuestionsRouter) DeleteQAndA() http.HandlerFunc {
 }
 
 func (router *QuestionsRouter) AnswerQuestion() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-
-	}
+	return func(w http.ResponseWriter, r *http.Request) {}
 }
 
-func (r *QuestionsRouter) GetLikesForQAndA() http.HandlerFunc {
+func (router *QuestionsRouter) GetLikesForQAndA() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-
+		questionId := chi.URLParam(r, "question_id")	
+		questionUuid := uuid.MustParse(questionId)
+		likes, err := router.likesRepository.GetLikesForQAndA(context.TODO(), questionUuid)	
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprintf("failed to fetch likes for answer with id %s %s", questionId, err)))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf(`{"likes":%v}`, likes)))
 	}
 }
 
