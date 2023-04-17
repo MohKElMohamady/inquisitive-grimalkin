@@ -6,11 +6,11 @@ import (
 )
 
 type Question struct {
-	QuestionId uuid.UUID `json: "questionId,omitempty"`
-	Asked      string    `json: "asked"`
-	Asker      string    `json: "asker"`
-	IsAnon     bool      `json: "isAnon"`
-	Question   string    `json: "question"`
+	QuestionId uuid.UUID `json:"questionId,omitempty"`
+	Asked      string    `json:"asked"`
+	Asker      string    `json:"asker"`
+	IsAnon     bool      `json:"isAnon"`
+	Question   string    `json:"question"`
 }
 
 type QAndA struct {
@@ -24,4 +24,10 @@ type QAndA struct {
 }
 
 type User struct {
+	Username string
+	Password string
+	Email string
+	FirstName string
+	LastName string
+	Roles []string
 }

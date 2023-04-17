@@ -38,7 +38,7 @@ var qAndAByUserTableDDL = `CREATE TABLE IF NOT EXISTS main.q_and_a_users (asked 
 
 /*
   - A problem that needs to be solved is showing the answered questions of the users that one person follows.
-  - The implementation is inspired by what was mentioned in Martin Kleppmann's Designing Data-Intensive Application (P11-13) about Twitter handling the display of
+  - The implementation is inspired by what was mentioned in Martin Kleppmann's Designing Data-Intensive Application (P11-13) about Twitter handling the kkjkjdisplay of
   - home timelines for users:
     EXCERPT STARTS
   - let’s consider Twitter as an example, using data published in November 2012 [16]. Two of Twitter’s main operations are:
@@ -168,7 +168,7 @@ func (c *CassandraQuestionsRepository) GetUnansweredQuestionsForUser(_ context.C
 
 	unansweredQuestions := []models.Question{}
 	for _, row := range res.GetResultSet().Rows {
-		parsedQuestionUuid, err := cassandraUuidToGoogleUuid(row.Values[1]) 
+		parsedQuestionUuid, err := cassandraUuidToGoogleUuid(row.Values[1])
 		if err != nil {
 			log.Printf("failed to parse the uuid of one question %s\n ", err)
 		}
@@ -242,7 +242,7 @@ func (c *CassandraQuestionsRepository) Ask(ctx context.Context, q models.Questio
   - 1) Delete the question from the original the questions_by_user table.
   - 2) Add the answered question in the Q&A question i.e. q_and_a_user
   - 3) Find the followers of that user and post it to their timelines i.e. search for all the followers of the asked person and post save in their
-	   q_and_a_follower table
+    q_and_a_follower table
   - Initial idea: Retrieve all the followers and the calculate their length i.e. number of followers, which a touch of concurreny, spawn number of goroutines
     equal to the number of followers and then write to their timeline. (this might be a huge overhead if the user has large number of followers). Maybe
     check the number of followers and try to rationalize i.e. distribute the actions of saving in the table depending on how big the followers are?
@@ -254,7 +254,7 @@ func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, qAndA
 
 	cassandraCompliantQAndAUuid, err := googleUuidToCassandraUuid(qAndA.QuestionId)
 	if err != nil {
-		return models.QAndA{}, fmt.Errorf("failed to answer the question and parsing the uuid %s", err) 
+		return models.QAndA{}, fmt.Errorf("failed to answer the question and parsing the uuid %s", err)
 	}
 
 	// Step 1 delete the question without an answer from its table
@@ -263,15 +263,15 @@ func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, qAndA
 		Cql: deleteTheQuestionWithoutAnswerQuery,
 		Values: &proto.Values{
 			Values: []*proto.Value{
-				&proto.Value{&proto.Value_String_{qAndA.Asked}},
-				&proto.Value{&proto.Value_Uuid{cassandraCompliantQAndAUuid}},
+				&proto.Value{Inner: &proto.Value_String_{qAndA.Asked}},
+				&proto.Value{Inner: &proto.Value_Uuid{cassandraCompliantQAndAUuid}},
 			},
 		},
 	})
 	if err != nil {
 		return models.QAndA{}, fmt.Errorf("failed to answer the question, unable to delete the question before reposting %s")
 	}
-	
+
 	qAndAUuid, err := uuid.NewUUID()
 	if err != nil {
 		return models.QAndA{}, fmt.Errorf("failed to generate new uuid for answer to question%s", err)
@@ -290,12 +290,12 @@ func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, qAndA
 		Cql: insertAnsweredQuestionQuery,
 		Values: &proto.Values{
 			Values: []*proto.Value{
-				{&proto.Value_String_{qAndA.Asked}},
-				{&proto.Value_Uuid{cassandraCompliantQAndAUuid}},
-				{&proto.Value_String_{qAndA.Answer}},
-				{&proto.Value_String_{qAndA.Asker}},
-				{&proto.Value_Boolean{qAndA.IsAnon}},
-				{&proto.Value_String_{qAndA.Question}},
+				{Inner: &proto.Value_String_{qAndA.Asked}},
+				{Inner: &proto.Value_Uuid{cassandraCompliantQAndAUuid}},
+				{Inner: &proto.Value_String_{qAndA.Answer}},
+				{Inner: &proto.Value_String_{qAndA.Asker}},
+				{Inner: &proto.Value_Boolean{qAndA.IsAnon}},
+				{Inner: &proto.Value_String_{qAndA.Question}},
 			},
 		},
 	})
@@ -305,17 +305,17 @@ func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, qAndA
 
 	// TODO: Step 3 post all the answer to the asked's followers
 
-	// TODO : Step 4 Add the Q&A to the likes counter table 
+	// TODO : Step 4 Add the Q&A to the likes counter table
 
 	return qAndA, nil
 }
 
-func (c *CassandraQuestionsRepository) UpdateAnswer(_ context.Context, _ models.Question) ([]models.Question, error) {
-	panic("not implemented") // TODO: Implement
+func (c *CassandraQuestionsRepository) UpdateAnswer(ctx context.Context, qAndA models.QAndA) (models.QAndA, error) {
+	panic("implement me") // TODO
 }
 
-func (c *CassandraQuestionsRepository) DeleteQandA(_ context.Context) error {
-	panic("not implemented") // TODO: Implement
+func (c *CassandraQuestionsRepository) DeleteQAndA(context context.Context, qAndA models.QAndA) error {
+	panic("implement") // TODO: Implement me
 }
 
 func NewCassandraLikesRepository() CassandraLikesRepository {
@@ -338,12 +338,12 @@ func (c *CassandraLikesRepository) GetLikesForQAndA(ctx context.Context, qAndAId
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch the likes for a specific Q&A with id %s", qAndAId)
 	}
-	
+
 	fetchLikesForQAndAQuery := &proto.Query{
-		Cql: `SELECT * FROM main.q_and_a_likes`,
+		Cql: `SELECT * FROM main.q_and_a_likes WHERE question_id = ?`,
 		Values: &proto.Values{
 			Values: []*proto.Value{
-				&proto.Value{&proto.Value_Uuid{cassandraCompliantUuid}},
+				&proto.Value{Inner: &proto.Value_Uuid{cassandraCompliantUuid}},
 			},
 		},
 	}
@@ -355,12 +355,11 @@ func (c *CassandraLikesRepository) GetLikesForQAndA(ctx context.Context, qAndAId
 	var likes int64 = 0
 	log.Printf("the total size of the result set is %v", len(res.GetResultSet().Rows))
 	for _, v := range res.GetResultSet().Rows {
-		log.Println("")
-		uuid, err := uuid.Parse(string(v.Values[0].GetUuid().Value))
+		cassandraCompliantQAndAUuid, err := cassandraUuidToGoogleUuid(v.Values[0])
+		likes = v.Values[1].GetInt()
 		if err != nil {
 			log.Fatalln(err)
 		}
-		log.Println(uuid)
 	}
 
 	return likes, nil
@@ -376,12 +375,12 @@ func (c *CassandraLikesRepository) CreateLikesEntryForQAndA(context context.Cont
 		return 0, fmt.Errorf("failed to insert the Q&A to the likes counter table %s", err)
 	}
 
-	addQAndAToLikesQuery := `update q_and_a_likes SET likes = likes + 0 WHERE question_id = ?;`	
+	addQAndAToLikesQuery := `update q_and_a_likes SET likes = likes + 0 WHERE question_id = ?;`
 	cassandraClient.ExecuteQuery(&proto.Query{
 		Cql: addQAndAToLikesQuery,
 		Values: &proto.Values{
 			Values: []*proto.Value{
-				{&proto.Value_Uuid{cassandraCompliantQAndAUuid}},
+				{Inner: &proto.Value_Uuid{cassandraCompliantQAndAUuid}},
 			},
 		},
 	})
@@ -405,7 +404,7 @@ func (c *CassandraLikesRepository) LikeQAndA(ctx context.Context, qAndAUuid uuid
 	if err != nil {
 		return fmt.Errorf("failed to like the q&a %s\n", err)
 	}
-	
+
 	return nil
 }
 
@@ -425,7 +424,33 @@ func (c *CassandraLikesRepository) UnlikeQAndA(ctx context.Context, qAndAUuid uu
 	if err != nil {
 		return fmt.Errorf("failed to like the q&a %s\n", err)
 	}
-	
+	return nil
+}
+
+func (c *CassandraLikesRepository) DeleteQAndA(ctx context.Context, qAndAUuid uuid.UUID) error {
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	cassandraCompliantQAndAUuid, err := googleUuidToCassandraUuid(qAndAUuid)
+	if err != nil {
+		return err
+	}
+
+	deleteQAndAQuery := `DELETE FROM main.q_and_a_likes WHERE question_id = ?`
+	_, err = cassandraClient.ExecuteQuery(
+		&proto.Query{
+			Cql: deleteQAndAQuery,
+			Values: &proto.Values{
+				Values: []*proto.Value{
+					&proto.Value{Inner: &proto.Value_Uuid{cassandraCompliantQAndAUuid}},
+				},
+			},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to delete the q&a from the likes table %s", err)
+	}
+
 	return nil
 }
 
@@ -438,16 +463,16 @@ func updateLikesQuery(action LikeAction, uuid uuid.UUID) (*proto.Query, error) {
 
 	switch action {
 	case Like:
-		q = `UPDATE q_and_a_likes SET likes = likes + 1 WHERE question_id  = ?;`
-	case Dislike:	
-		q = `UPDATE q_and_a_likes SET likes = likes - 1 WHERE question_id  = ?;`
+		q = `UPDATE main.q_and_a_likes SET likes = likes + 1 WHERE question_id  = ?;`
+	case Dislike:
+		q = `UPDATE main.q_and_a_likes SET likes = likes - 1 WHERE question_id  = ?;`
 	}
 
 	return &proto.Query{
 		Cql: q,
 		Values: &proto.Values{
 			Values: []*proto.Value{
-				&proto.Value{&proto.Value_Uuid{cassandraCompliantUuid}},
+				&proto.Value{Inner: &proto.Value_Uuid{cassandraCompliantUuid}},
 			},
 		},
 	}, nil
@@ -469,4 +494,43 @@ func googleUuidToCassandraUuid(id uuid.UUID) (*proto.Uuid, error) {
 	}
 	cassandraCompliantQuestionUuid := &proto.Uuid{Value: generatedQuestionIdInBytes}
 	return cassandraCompliantQuestionUuid, nil
+}
+
+func NewCassandraUsersRepository() UsersRepository {
+	return &CassandraUsersRepository{}
+}
+
+type CassandraUsersRepository struct {
+}
+
+func (c *CassandraUsersRepository) DoesUserExist(context context.Context, u models.User) (bool, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *CassandraUsersRepository) Register(_ context.Context, _ models.User) (models.User, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *CassandraUsersRepository) Login(_ context.Context, _ models.User) (models.User, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *CassandraUsersRepository) Delete(_ context.Context, _ models.User) error {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *CassandraUsersRepository) UpdateLoginDetails(_ context.Context, _ models.User) (models.User, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *CassandraUsersRepository) Follow(context context.Context, follower models.User, followed models.User) error {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *CassandraUsersRepository) Unfollow(context context.Context, follower models.User, followed models.User) error {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *CassandraUsersRepository) SearchForUsername(context context.Context, username string) ([]models.User, error) {
+	panic("not implemented") // TODO: Implement
 }
