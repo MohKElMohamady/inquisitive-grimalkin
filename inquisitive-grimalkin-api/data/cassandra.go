@@ -9,14 +9,15 @@ import (
 	"github.com/stargate/stargate-grpc-go-client/stargate/pkg/auth"
 	"github.com/stargate/stargate-grpc-go-client/stargate/pkg/client"
 	"github.com/stargate/stargate-grpc-go-client/stargate/pkg/proto"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"inquisitive-grimalkin/models"
 	"inquisitive-grimalkin/utils"
 	"log"
 	"os"
 	"sync"
 	"time"
+	// "golang.org/x/crypto/bcrypt"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 type LikeAction int
@@ -71,13 +72,13 @@ var qAndALikesDDL = `CREATE TABLE IF NOT EXISTS main.q_and_a_likes (question_id 
 
 var usersDDL = `CREATE TABLE IF NOT EXISTS main.users (username text, email text, first_name text, last_name text, password text, created_on timeuuid, PRIMARY KEY ((username)));`
 
-/* 
- * This table will have the user as the partition key and the followers i.e. other users as clustering keys 
+/*
+ * This table will have the user as the partition key and the followers i.e. other users as clustering keys
  */
 var userByFollowersDDL = `CREATE TABLE IF NOT EXISTS main.user_by_followers (username text, follower text, PRIMARY KEY ((username), follower));`
 
 /*
- * Instead of using grouping by and counting the number of those who the user follows and who follow him, we will create two counter tables each for following and followers 
+ * Instead of using grouping by and counting the number of those who the user follows and who follow him, we will create two counter tables each for following and followers
  */
 var followersOfUserCounterDDL = `CREATE TABLE IF NOT EXISTS main.followers_of_user_counter (username text, followers counter, PRIMARY KEY ((username)));`
 var followingByUserCounterDDL = `CREATE TABLE IF NOT EXISTS main.followed_by_user_counter (username text, followering counter, PRIMARY KEY ((username)));`
@@ -115,7 +116,7 @@ func init() {
 	cassandraBearerToken = os.Getenv("CASSANDRA_BEARER_TOKEN")
 
 	tableCreationSynchronizer := sync.WaitGroup{}
-	tableCreationSynchronizer.Add(2)
+	tableCreationSynchronizer.Add(4)
 
 	go func() {
 		cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
@@ -146,6 +147,37 @@ func init() {
 		tableCreationSynchronizer.Done()
 	}()
 
+	go func() {
+		cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+		defer cassandraConnectionClient.Put(cassandraClient)
+		_, err := cassandraClient.ExecuteQuery(&proto.Query{Cql: usersDDL})
+		if err != nil {
+			log.Fatalf("failed to create users table %s\n", err)
+		}
+
+		_, err = cassandraClient.ExecuteQuery(&proto.Query{Cql: userByFollowersDDL})
+		if err != nil {
+			log.Fatalf("failed to create users_by_followers table %s\n", err)
+		}
+		tableCreationSynchronizer.Done()
+
+	}()
+
+	go func() {
+		cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+		defer cassandraConnectionClient.Put(cassandraClient)
+		_, err := cassandraClient.ExecuteQuery(&proto.Query{Cql: followersOfUserCounterDDL})
+		if err != nil {
+			log.Fatalf("failed to create followers by user counter table %s\n", err)
+		}
+
+		_, err = cassandraClient.ExecuteQuery(&proto.Query{Cql: followingByUserCounterDDL})
+		if err != nil {
+			log.Fatalf("failed to create following by user counter table %s\n", err)
+		}
+		tableCreationSynchronizer.Done()
+
+	}()
 	tableCreationSynchronizer.Wait()
 	log.Printf("successfully created all tables ")
 }
@@ -324,7 +356,11 @@ func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, qAndA
 }
 
 func (c *CassandraQuestionsRepository) UpdateAnswer(ctx context.Context, qAndA models.QAndA) (models.QAndA, error) {
-	panic("not implement") // TODO: Implement
+	panic("not implemented") // TODO: implement
+}
+
+func (c *CassandraQuestionsRepository) DeleteQAndA(context context.Context, qAndA models.QAndA) error {
+	panic("not implemented") // TODO: implement
 }
 
 func NewCassandraLikesRepository() CassandraLikesRepository {
@@ -364,7 +400,7 @@ func (c *CassandraLikesRepository) GetLikesForQAndA(ctx context.Context, qAndAId
 	var likes int64 = 0
 	log.Printf("the total size of the result set is %v", len(res.GetResultSet().Rows))
 	for _, v := range res.GetResultSet().Rows {
-		cassandraCompliantQAndAUuid, err := cassandraUuidToGoogleUuid(v.Values[0])
+		_, err := cassandraUuidToGoogleUuid(v.Values[0])
 		likes = v.Values[1].GetInt()
 		if err != nil {
 			log.Fatalln(err)
@@ -403,7 +439,7 @@ func (c *CassandraLikesRepository) LikeQAndA(ctx context.Context, qAndAUuid uuid
 
 	q, err := updateLikesQuery(Like, qAndAUuid)
 	if err != nil {
-		return fmt.Errorf("failed to like the q&a %s\n", err)
+		return fmt.Errorf("failed to like the q&a %s", err)
 	}
 
 	/*
@@ -513,11 +549,87 @@ type CassandraUsersRepository struct {
 }
 
 func (c *CassandraUsersRepository) DoesUserExist(context context.Context, u models.User) (bool, error) {
-	panic("not implemented") // TODO: Implement
+	panic("not implemented") // TODO: implement
 }
 
-func (c *CassandraUsersRepository) Register(_ context.Context, _ models.User) (models.User, error) {
-	panic("not implemented") // TODO: Implement
+func (c *CassandraUsersRepository) Register(context context.Context, u models.User) (models.User, error) {
+
+	err := utils.ValidateRegistration(u)
+	if err != nil {
+		return models.User{}, fmt.Errorf("failed to register user %s", err)
+	}
+
+	userCreationTimeUuid, err := uuid.NewUUID() 
+	if err != nil {
+		return models.User{}, err
+	}
+	cassandraCompliantUserCreationTimeUuid, err := googleUuidToCassandraUuid(userCreationTimeUuid)
+	if err != nil {
+		return models.User{}, err
+	}
+	// TODO: Password hashing?
+	// hashedPassword := bcrypt.GenerateFromPassword()
+
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	registerUserQuery := &proto.Query{
+		Cql: `INSERT INTO main.users 
+				(username , created_on , email , first_name , last_name , password ) 
+				VALUES (? , ? , ?, ?, ?, ?);`,
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				&proto.Value{Inner: &proto.Value_String_{u.Username}},
+				&proto.Value{Inner: &proto.Value_Uuid{cassandraCompliantUserCreationTimeUuid}},
+				&proto.Value{Inner: &proto.Value_String_{u.Email}},
+				&proto.Value{Inner: &proto.Value_String_{u.FirstName}},
+				&proto.Value{Inner: &proto.Value_String_{u.LastName}},
+				&proto.Value{Inner: &proto.Value_String_{u.Password}},
+			},
+		},
+	}
+	setFollowersToZeroQuery := &proto.BatchQuery{
+		Cql: `UPDATE main.followers_of_user_counter SET followers = followers + 0 WHERE username = ?;`,
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				&proto.Value{Inner: &proto.Value_String_{u.Username}},
+			},
+		},
+	}
+	setFollowingToZeroQuery := &proto.BatchQuery{
+		Cql: `UPDATE main.followed_by_user_counter SET followering = followering + 0 WHERE username = ?;`,
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				&proto.Value{Inner: &proto.Value_String_{u.Username}},
+			},
+		},
+	}
+
+	//TODO: Use cancel here with context if any of them fail
+	go func() {
+		_, err := cassandraClient.ExecuteQuery(registerUserQuery)	
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	//TODO: Use cancel here with context if any of them fail
+	go func() {
+		_, err := cassandraClient.ExecuteBatch(&proto.Batch{
+			Type: proto.Batch_COUNTER,
+			Queries:  []*proto.BatchQuery{
+				setFollowersToZeroQuery,
+				setFollowingToZeroQuery,
+			},
+		})	
+		if err != nil {
+			panic(err)
+		}
+	}()
+	if err != nil {
+		return models.User{}, fmt.Errorf("failed to save user in database %s", err)
+	}
+	return u, nil
 }
 
 func (c *CassandraUsersRepository) Login(_ context.Context, _ models.User) (models.User, error) {
