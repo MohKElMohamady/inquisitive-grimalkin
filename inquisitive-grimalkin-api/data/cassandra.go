@@ -75,10 +75,11 @@ var usersDDL = `CREATE TABLE IF NOT EXISTS main.users (username text, email text
 /*
  * This table will have the user as the partition key and the followers i.e. other users as clustering keys
  */
-var userByFollowersDDL = `CREATE TABLE IF NOT EXISTS main.user_by_followers (username text, follower text, PRIMARY KEY ((username), follower));`
+var userByFollowersDDL = `CREATE TABLE IF NOT EXISTS main.followers_by_user (followed text, follower text, PRIMARY KEY ((followed), follower));`
 
 /*
- * Instead of using grouping by and counting the number of those who the user follows and who follow him, we will create two counter tables each for following and followers
+ * Instead of using grouping by and counting the number of those who the user follows and who follow him, we will create two counter tables each for following 
+   and followers
  */
 var followersOfUserCounterDDL = `CREATE TABLE IF NOT EXISTS main.followers_of_user_counter (username text, followers counter, PRIMARY KEY ((username)));`
 var followingByUserCounterDDL = `CREATE TABLE IF NOT EXISTS main.followed_by_user_counter (username text, followering counter, PRIMARY KEY ((username)));`
@@ -179,7 +180,7 @@ func init() {
 
 	}()
 	tableCreationSynchronizer.Wait()
-	log.Printf("successfully created all tables ")
+	log.Printf("successfully created all tables")
 }
 
 func NewCassandraQuestionsRepository() CassandraQuestionsRepository {
@@ -189,7 +190,7 @@ func NewCassandraQuestionsRepository() CassandraQuestionsRepository {
 type CassandraQuestionsRepository struct {
 }
 
-func (c *CassandraQuestionsRepository) GetUnansweredQuestionsForUser(_ context.Context, askedUser string) ([]models.Question, error) {
+func (c *CassandraQuestionsRepository) GetUnansweredQuestionsForUser(context context.Context, askedUser string) ([]models.Question, error) {
 	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
 	defer cassandraConnectionClient.Put(cassandraClient)
 
@@ -198,7 +199,7 @@ func (c *CassandraQuestionsRepository) GetUnansweredQuestionsForUser(_ context.C
 	}
 
 	getUnAnsweredQuestionForUserQuery := &proto.Query{
-		Cql: "SELECT * FROM main.questions_by_user WHERE asked = ?",
+		Cql: "SELECT * FROM main.questions_by_user WHERE asked = ?;",
 		Values: &proto.Values{
 			Values: []*proto.Value{
 				{Inner: &proto.Value_String_{askedUser}},
@@ -282,28 +283,17 @@ func (c *CassandraQuestionsRepository) Ask(ctx context.Context, q models.Questio
 	return persistedQuestion, nil
 }
 
-/*
-  - Answering the question will have multiple steps:
-  - 1) Delete the question from the original the questions_by_user table.
-  - 2) Add the answered question in the Q&A question i.e. q_and_a_user
-  - 3) Find the followers of that user and post it to their timelines i.e. search for all the followers of the asked person and post save in their
-    q_and_a_follower table
-  - Initial idea: Retrieve all the followers and the calculate their length i.e. number of followers, which a touch of concurreny, spawn number of goroutines
-    equal to the number of followers and then write to their timeline. (this might be a huge overhead if the user has large number of followers). Maybe
-    check the number of followers and try to rationalize i.e. distribute the actions of saving in the table depending on how big the followers are?
-  - 4) Since the counter tables do not allow insertion, we will just update the q&a of that like to be added and set to zero.
-*/
-func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, qAndA models.QAndA) (models.QAndA, error) {
+func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context,questionId uuid.UUID, qAndA models.QAndA) (models.QAndA, error) {
 	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
 	defer cassandraConnectionClient.Put(cassandraClient)
 
-	cassandraCompliantQAndAUuid, err := googleUuidToCassandraUuid(qAndA.QuestionId)
+	cassandraCompliantQAndAUuid, err := googleUuidToCassandraUuid(questionId)
 	if err != nil {
 		return models.QAndA{}, fmt.Errorf("failed to answer the question and parsing the uuid %s", err)
 	}
 
-	// Step 1 delete the question without an answer from its table
-	deleteTheQuestionWithoutAnswerQuery := `delete FROM questions_by_user WHERE asked = ? AND question_id = ?;`
+	// TODO: Refactor the deletion into a separate table
+	deleteTheQuestionWithoutAnswerQuery := `delete FROM main.questions_by_user WHERE asked = ? AND question_id = ?;`
 	_, err = cassandraClient.ExecuteQuery(&proto.Query{
 		Cql: deleteTheQuestionWithoutAnswerQuery,
 		Values: &proto.Values{
@@ -314,7 +304,7 @@ func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, qAndA
 		},
 	})
 	if err != nil {
-		return models.QAndA{}, fmt.Errorf("failed to answer the question, unable to delete the question before reposting %s")
+		return models.QAndA{}, fmt.Errorf("failed to answer the question, unable to delete the question before reposting %s", err)
 	}
 
 	qAndAUuid, err := uuid.NewUUID()
@@ -348,10 +338,7 @@ func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, qAndA
 		return models.QAndA{}, fmt.Errorf("failed to save the answer to the question %s", err)
 	}
 
-	// TODO: Step 3 post all the answer to the asked's followers
-
-	// TODO : Step 4 Add the Q&A to the likes counter table
-
+	qAndA.QuestionId = qAndAUuid
 	return qAndA, nil
 }
 
@@ -414,14 +401,13 @@ func (c *CassandraLikesRepository) CreateLikesEntryForQAndA(context context.Cont
 
 	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
 	defer cassandraConnectionClient.Put(cassandraClient)
-
 	cassandraCompliantQAndAUuid, err := googleUuidToCassandraUuid(qAndAId)
 	if err != nil {
 		return 0, fmt.Errorf("failed to insert the Q&A to the likes counter table %s", err)
 	}
 
-	addQAndAToLikesQuery := `update q_and_a_likes SET likes = likes + 0 WHERE question_id = ?;`
-	cassandraClient.ExecuteQuery(&proto.Query{
+	addQAndAToLikesQuery := `update main.q_and_a_likes SET likes = likes + 0 WHERE question_id = ?;`
+	_, err = cassandraClient.ExecuteQuery(&proto.Query{
 		Cql: addQAndAToLikesQuery,
 		Values: &proto.Values{
 			Values: []*proto.Value{
@@ -429,6 +415,9 @@ func (c *CassandraLikesRepository) CreateLikesEntryForQAndA(context context.Cont
 			},
 		},
 	})
+	if err != nil {
+		return -1, fmt.Errorf("failed to create a likes counter for question with id %s %s", qAndAId, err)
+	}
 	return 0, nil
 
 }
@@ -475,6 +464,9 @@ func (c *CassandraLikesRepository) UnlikeQAndA(ctx context.Context, qAndAUuid uu
 func (c *CassandraLikesRepository) DeleteQAndA(ctx context.Context, qAndAUuid uuid.UUID) error {
 	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
 	defer cassandraConnectionClient.Put(cassandraClient)
+	cassandraClient.ExecuteBatch(&proto.Batch{
+		Queries: []*proto.BatchQuery{},
+	})
 
 	cassandraCompliantQAndAUuid, err := googleUuidToCassandraUuid(qAndAUuid)
 	if err != nil {
@@ -654,4 +646,34 @@ func (c *CassandraUsersRepository) Unfollow(context context.Context, follower mo
 
 func (c *CassandraUsersRepository) SearchForUsername(context context.Context, username string) ([]models.User, error) {
 	panic("not implemented") // TODO: Implement
+}
+
+func (c *CassandraUsersRepository) FindFollowersOfUser(context context.Context, username string) ([]models.User, error) {
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	followersOfUsersQuery := `SELECT * FROM main.followers_by_user WHERE followed = ?;`
+
+	res, err := cassandraClient.ExecuteQuery(&proto.Query{
+		Cql: followersOfUsersQuery,
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				&proto.Value{Inner: &proto.Value_String_{username}},
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch the followers of user %s %s", username, err)
+	}
+
+	followers := []models.User{}
+
+	for _, r := range res.GetResultSet().Rows {
+		followers = append(followers, models.User{
+			// The followers' column is the second
+			Username: r.Values[1].GetString_(),
+		})	
+	}
+
+	return followers, nil
 }

@@ -9,9 +9,10 @@ import (
 type QuestionsRepository interface {
 	GetUnansweredQuestionsForUser(context.Context, string) ([]models.Question, error)
 	Ask(context.Context, models.Question) (models.Question, error)
-	AnswerQuestion(context.Context, models.QAndA) (models.QAndA, error)
+	AnswerQuestion(context context.Context,questionId uuid.UUID , qAndA models.QAndA) (models.QAndA, error)
 	UpdateAnswer(context.Context, models.QAndA) (models.QAndA, error)
 	DeleteQAndA(context.Context, models.QAndA) error
+	PostAnswerToFollowersHomefeed(context.Context, models.QAndA,...models.User) (error)
 }
 
 type LikesRepository interface {
@@ -30,5 +31,6 @@ type UsersRepository interface {
 	UpdateLoginDetails(context.Context, models.User) (models.User, error)
 	Follow(context context.Context, follower models.User, followed models.User) (error)
 	Unfollow(context context.Context, follower models.User, followed models.User) (error)
+	FindFollowersOfUser(context context.Context, username string) ([]models.User, error)
 	SearchForUsername(context.Context, string) ([]models.User, error)
 }
