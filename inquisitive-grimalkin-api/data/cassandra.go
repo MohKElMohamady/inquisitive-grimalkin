@@ -69,6 +69,19 @@ var qAndAByFollowerDDL = `CREATE TABLE IF NOT EXISTS main.q_and_a_followers (fol
 							PRIMARY KEY ((follower), question_id));`
 var qAndALikesDDL = `CREATE TABLE IF NOT EXISTS main.q_and_a_likes (question_id timeuuid, likes counter, PRIMARY KEY ((question_id)));`
 
+var usersDDL = `CREATE TABLE IF NOT EXISTS main.users (username text, email text, first_name text, last_name text, password text, created_on timeuuid, PRIMARY KEY ((username)));`
+
+/* 
+ * This table will have the user as the partition key and the followers i.e. other users as clustering keys 
+ */
+var userByFollowersDDL = `CREATE TABLE IF NOT EXISTS main.user_by_followers (username text, follower text, PRIMARY KEY ((username), follower));`
+
+/*
+ * Instead of using grouping by and counting the number of those who the user follows and who follow him, we will create two counter tables each for following and followers 
+ */
+var followersOfUserCounterDDL = `CREATE TABLE IF NOT EXISTS main.followers_of_user_counter (username text, followers counter, PRIMARY KEY ((username)));`
+var followingByUserCounterDDL = `CREATE TABLE IF NOT EXISTS main.followed_by_user_counter (username text, followering counter, PRIMARY KEY ((username)));`
+
 var cassandraConnectionClient = sync.Pool{
 	New: func() any {
 		config := &tls.Config{InsecureSkipVerify: false}
@@ -311,11 +324,7 @@ func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, qAndA
 }
 
 func (c *CassandraQuestionsRepository) UpdateAnswer(ctx context.Context, qAndA models.QAndA) (models.QAndA, error) {
-	panic("implement me") // TODO
-}
-
-func (c *CassandraQuestionsRepository) DeleteQAndA(context context.Context, qAndA models.QAndA) error {
-	panic("implement") // TODO: Implement me
+	panic("not implement") // TODO: Implement
 }
 
 func NewCassandraLikesRepository() CassandraLikesRepository {
