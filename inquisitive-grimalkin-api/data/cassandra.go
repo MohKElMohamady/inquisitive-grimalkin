@@ -491,6 +491,49 @@ func (c *CassandraLikesRepository) DeleteQAndA(ctx context.Context, qAndAUuid uu
 	return nil
 }
 
+func (c *CassandraQuestionsRepository) PostAnswerToFollowersHomefeed(context context.Context, qAndA models.QAndA, users []models.User) error {
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+
+	postToTimeLineBatchQuery := []*proto.BatchQuery{}
+
+	for _, u := range users {
+		cassandraCompliantUuid, err := googleUuidToCassandraUuid(qAndA.QuestionId)
+		if err != nil {
+			return err 
+		}
+		postToTimeLineBatchQuery = append(postToTimeLineBatchQuery, &proto.BatchQuery{
+			Cql: ` INSERT INTO main.q_and_a_followers 
+			       (follower , question_id , answer , asked, asker , is_anon , question) 
+				   VALUES 
+				   (? , ?, ?, ?, ? , ?, ?);`,
+			Values: &proto.Values{
+				Values: []*proto.Value{
+					&proto.Value{Inner : &proto.Value_String_{u.Username}},
+					&proto.Value{Inner : &proto.Value_Uuid{cassandraCompliantUuid}},
+					&proto.Value{Inner : &proto.Value_String_{qAndA.Answer}},
+					&proto.Value{Inner : &proto.Value_String_{qAndA.Asked}},
+					&proto.Value{Inner : &proto.Value_String_{qAndA.Asker}},
+					&proto.Value{Inner : &proto.Value_Boolean{qAndA.IsAnon}},
+					&proto.Value{Inner : &proto.Value_String_{qAndA.Question}},
+				},
+			},
+		})	
+	}
+
+	if len(postToTimeLineBatchQuery) == 0 {
+		return nil
+	}
+
+	_, err := cassandraClient.ExecuteBatch(&proto.Batch{Type: proto.Batch_LOGGED, Queries: postToTimeLineBatchQuery})
+	if err != nil {
+		return fmt.Errorf("failed to post to usertime lines %s", err)
+	}
+
+	return nil
+}
+
 func updateLikesQuery(action LikeAction, uuid uuid.UUID) (*proto.Query, error) {
 	var q string
 	cassandraCompliantUuid, err := googleUuidToCassandraUuid(uuid)
