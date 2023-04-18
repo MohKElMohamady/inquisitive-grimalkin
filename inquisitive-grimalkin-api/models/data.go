@@ -24,10 +24,10 @@ type QAndA struct {
 }
 
 type User struct {
-	Username string
-	Password string
-	Email string
-	FirstName string
-	LastName string
-	Roles []string
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Email string `json:"email"`
+	FirstName string `json:"firstName"`
+	LastName string `json:"lastName"`
+	Roles []string 
 }

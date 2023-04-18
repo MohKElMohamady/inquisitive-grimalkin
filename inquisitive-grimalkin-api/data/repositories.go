@@ -23,10 +23,12 @@ type LikesRepository interface {
 }
 
 type UsersRepository interface {
+	DoesUserExist(context.Context, models.User) (bool, error)
 	Register(context.Context, models.User) (models.User, error)
 	Login(context.Context, models.User) (models.User, error)
 	Delete(context.Context, models.User) error
 	UpdateLoginDetails(context.Context, models.User) (models.User, error)
 	Follow(context context.Context, follower models.User, followed models.User) (error)
 	Unfollow(context context.Context, follower models.User, followed models.User) (error)
+	SearchForUsername(context.Context, string) ([]models.User, error)
 }
