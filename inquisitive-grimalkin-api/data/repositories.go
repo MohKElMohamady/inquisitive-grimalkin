@@ -13,6 +13,8 @@ type QuestionsRepository interface {
 	UpdateAnswer(context.Context, models.QAndA) (models.QAndA, error)
 	DeleteQAndA(context.Context, models.QAndA) error
 	PostAnswerToFollowersHomefeed(context.Context, models.QAndA,...models.User) (error)
+	UpdateAnswerToFollowersHomefeed(context.Context, models.QAndA, ...models.User) (error)
+	DeleteAnswerFromFollowersHomefeed(context.Context, models.QAndA, ...models.User) (error)
 }
 
 type LikesRepository interface {

@@ -4,29 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"inquisitive-grimalkin/data"
 	"inquisitive-grimalkin/models"
+	"inquisitive-grimalkin/services"
 	"io"
 	"log"
 	"net/http"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 )
 
 type QuestionsRouter struct {
 	chi.Router
-	questionsRepository     data.CassandraQuestionsRepository
-	likesRepository data.CassandraLikesRepository
+	questionsRepository data.CassandraQuestionsRepository
+	likesRepository     data.CassandraLikesRepository
+	questionsService    services.QuestionsService
 }
 
 func NewQuestionsRouter() QuestionsRouter {
 
 	r := chi.NewRouter()
 	questionsRouter := QuestionsRouter{
-		Router: r,
+		Router:              r,
 		questionsRepository: data.NewCassandraQuestionsRepository(),
-		likesRepository: data.NewCassandraLikesRepository(),
+		likesRepository:     data.NewCassandraLikesRepository(),
+		questionsService:    services.QuestionsService{},
 	}
 
 	r.Get("/", questionsRouter.GetUnansweredQuestions())
@@ -61,7 +63,7 @@ func (router *QuestionsRouter) Ask() http.HandlerFunc {
 			w.Write([]byte("failed to parsed the request"))
 			return
 		}
-		
+
 		question := models.Question{}
 		err = json.Unmarshal(reqInBytes, &question)
 		if err != nil {
@@ -71,20 +73,20 @@ func (router *QuestionsRouter) Ask() http.HandlerFunc {
 		}
 
 		context := context.TODO()
-		q, err := router.questionsRepository.Ask(context, question)
+		q, err := router.questionsService.Ask(context, question)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(err.Error()))
 			return
 		}
-		resInBytes, err := json.Marshal(q)	
+		resInBytes, err := json.Marshal(q)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(err.Error()))
 			return
 		}
 
-		log.Println("Successfully handled the request of asking a question")	
+		log.Println("Successfully handled the request of asking a question")
 		w.WriteHeader(http.StatusCreated)
 		w.Write(resInBytes)
 	}
@@ -103,14 +105,51 @@ func (r *QuestionsRouter) DeleteQAndA() http.HandlerFunc {
 }
 
 func (router *QuestionsRouter) AnswerQuestion() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {}
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		context := context.TODO()
+		questionUuidInString := chi.URLParam(r, "question_id")
+		reqInBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprintf("failed to answer the question with id %s %s", questionUuidInString, err)))
+			return
+		}
+
+		var qAndA models.QAndA
+		err = json.Unmarshal(reqInBytes, &qAndA) 
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprintf("failed to answer the question with id %s %s", questionUuidInString, err)))
+			return
+		}
+
+		qAndA, err = router.questionsService.AnswerQuestion(context, questionUuidInString, qAndA)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprintf("failed to answer the question with id %s %s", questionUuidInString, err)))
+			return
+		}
+
+		marshalledQAndA, err := json.Marshal(qAndA)	
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprintf("failed to answer the question with id %s %s", questionUuidInString, err)))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write(marshalledQAndA)
+
+	}
+
 }
 
 func (router *QuestionsRouter) GetLikesForQAndA() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		questionId := chi.URLParam(r, "question_id")	
+		questionId := chi.URLParam(r, "question_id")
 		questionUuid := uuid.MustParse(questionId)
-		likes, err := router.likesRepository.GetLikesForQAndA(context.TODO(), questionUuid)	
+		likes, err := router.likesRepository.GetLikesForQAndA(context.TODO(), questionUuid)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(fmt.Sprintf("failed to fetch likes for answer with id %s %s", questionId, err)))
@@ -123,9 +162,9 @@ func (router *QuestionsRouter) GetLikesForQAndA() http.HandlerFunc {
 
 func (router *QuestionsRouter) LikeQAndA() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		questionId := chi.URLParam(r, "question_id")	
+		questionId := chi.URLParam(r, "question_id")
 		questionUuid := uuid.MustParse(questionId)
-		err := router.likesRepository.LikeQAndA(context.TODO(), questionUuid)	
+		err := router.likesRepository.LikeQAndA(context.TODO(), questionUuid)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(fmt.Sprintf("failed to like answer with id %s %s", questionId, err)))
@@ -137,9 +176,9 @@ func (router *QuestionsRouter) LikeQAndA() http.HandlerFunc {
 
 func (router *QuestionsRouter) UnlikeQAndA() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		questionId := chi.URLParam(r, "question_id")	
+		questionId := chi.URLParam(r, "question_id")
 		questionUuid := uuid.MustParse(questionId)
-		err := router.likesRepository.UnlikeQAndA(context.TODO(), questionUuid)	
+		err := router.likesRepository.UnlikeQAndA(context.TODO(), questionUuid)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(fmt.Sprintf("failed to like answer with id %s %s", questionId, err)))
