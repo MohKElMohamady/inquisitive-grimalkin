@@ -6,15 +6,19 @@ import (
 	"fmt"
 	"inquisitive-grimalkin/data"
 	"inquisitive-grimalkin/models"
+	"inquisitive-grimalkin/services"
 	"io"
+	"log"
 	"net/http"
-
+	"time"
 	"github.com/go-chi/chi/v5"
+	jwt "github.com/golang-jwt/jwt"
 )
 
 type UsersRouter struct {
 	chi.Router
 	userRepository data.UsersRepository
+	userService services.UsersService
 }
 
 func NewUsersRouter() UsersRouter {
@@ -27,6 +31,10 @@ func NewUsersRouter() UsersRouter {
 	r.Post("/register", r.Register())
 	r.Post("/login", r.Login())
 	r.Post("/validate", r.Validate())
+	//TODO: As a placeholder, we will be adding the follower to the path, but it should be noted that the follower username will be removed from the url and parsed from JWT
+	r.Post("/follow/{followed}/follower/{follower}", r.Follow())
+	//TODO: As a placeholder, we will be adding the follower to the path, but it should be noted that the follower username will be removed from the url and parsed from JWT
+	r.Post("/unfollow/{followed}/follower/{follower}", r.Unfollow())
 	r.Get("/{username}", r.SearchForUsername())
 
 	return r
@@ -62,10 +70,24 @@ func (router *UsersRouter) Register() http.HandlerFunc {
 		}
 
 		registeredUserInString := fmt.Sprintf("%s", registeredUser)
-		w.WriteHeader(http.StatusOK)
-		//TODO Create a token and return it instead of returning the user
-		w.Write([]byte(registeredUserInString))
 
+		claimsForANormalUser := jwt.MapClaims{
+			`nba`:(time.Now().Unix() + 31536000),
+			`username`:registeredUser.Username,
+		}
+
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claimsForANormalUser)
+
+		tokenString, err := token.SignedString([]byte(signingKey))
+		if err != nil {
+			msg := fmt.Sprintf("failed to sign the jwt %s", err)
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(msg))
+			return
+		}
+		w.Header().Set("Authorization", `bearer ` + tokenString)
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(registeredUserInString))
 	}
 }
 
@@ -78,6 +100,33 @@ func (router *UsersRouter) Login() http.HandlerFunc {
 func (router *UsersRouter) Validate() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 	}
+}
+
+func (router *UsersRouter) Follow() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		follower := chi.URLParam(r, "follower")
+		following := chi.URLParam(r, "following")
+
+		context := context.TODO()
+		err := router.userService.Follow(context, follower, following)
+		if err != nil {
+
+			return
+		}
+	}	
+}
+
+func (router *UsersRouter) Unfollow() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		follower := chi.URLParam(r, "follower")
+		following := chi.URLParam(r, "following")
+
+		context := context.TODO()
+		err := router.userService.Unfollow(context, follower, following)
+		if err != nil {
+			return
+		}
+	}	
 }
 
 func (router *UsersRouter) SearchForUsername() http.HandlerFunc {
