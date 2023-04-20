@@ -7,8 +7,8 @@ import (
 	"inquisitive-grimalkin/data"
 	"inquisitive-grimalkin/models"
 	"inquisitive-grimalkin/services"
+	"inquisitive-grimalkin/utils"
 	"io"
-	"log"
 	"net/http"
 	"time"
 	"github.com/go-chi/chi/v5"
@@ -32,9 +32,9 @@ func NewUsersRouter() UsersRouter {
 	r.Post("/login", r.Login())
 	r.Post("/validate", r.Validate())
 	//TODO: As a placeholder, we will be adding the follower to the path, but it should be noted that the follower username will be removed from the url and parsed from JWT
-	r.Post("/follow/{followed}/follower/{follower}", r.Follow())
+	r.Post("/follow/{followed}", r.Follow())
 	//TODO: As a placeholder, we will be adding the follower to the path, but it should be noted that the follower username will be removed from the url and parsed from JWT
-	r.Post("/unfollow/{followed}/follower/{follower}", r.Unfollow())
+	r.Post("/unfollow/{followed}", r.Unfollow())
 	r.Get("/{username}", r.SearchForUsername())
 
 	return r
@@ -104,28 +104,33 @@ func (router *UsersRouter) Validate() http.HandlerFunc {
 
 func (router *UsersRouter) Follow() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		follower := chi.URLParam(r, "follower")
-		following := chi.URLParam(r, "following")
-
-		context := context.TODO()
-		err := router.userService.Follow(context, follower, following)
+		followed := chi.URLParam(r, "followed")
+		follower, _ := utils.UserFromContext(r.Context())
+		err := router.userService.Follow(r.Context(), follower, followed)
 		if err != nil {
-
+			errMsg := fmt.Sprintf("failed to follow user %s %s", followed, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(errMsg))
 			return
 		}
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("followed " + followed))
 	}	
 }
 
 func (router *UsersRouter) Unfollow() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		follower := chi.URLParam(r, "follower")
-		following := chi.URLParam(r, "following")
-
-		context := context.TODO()
-		err := router.userService.Unfollow(context, follower, following)
+		unfollowed := chi.URLParam(r, "unfollowed")
+		follower, _ := utils.UserFromContext(r.Context())
+		err := router.userService.Follow(r.Context(), follower, unfollowed)
 		if err != nil {
+			errMsg := fmt.Sprintf("failed to follow user %s %s", unfollowed, err)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(errMsg))
 			return
 		}
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte("unfollowed " + unfollowed))
 	}	
 }
 
