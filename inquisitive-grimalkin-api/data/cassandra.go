@@ -107,6 +107,7 @@ var cassandraConnectionClient = sync.Pool{
 }
 
 func init() {
+
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatalf("something went wrong in loading the variables %s\n", err)
@@ -188,6 +189,16 @@ func NewCassandraQuestionsRepository() CassandraQuestionsRepository {
 }
 
 type CassandraQuestionsRepository struct {
+}
+
+func (c *CassandraQuestionsRepository) UpdateAnswerToFollowersHomefeed(ctx context.Context, a models.QAndA, user ...models.User) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (c *CassandraQuestionsRepository) DeleteAnswerFromFollowersHomefeed(ctx context.Context, a models.QAndA, user ...models.User) error {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (c *CassandraQuestionsRepository) GetUnansweredQuestionsForUser(context context.Context, askedUser string) ([]models.Question, error) {
@@ -343,12 +354,12 @@ func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, quest
 	return qAndA, nil
 }
 
-func (c *CassandraQuestionsRepository) UpdateAnswer(ctx context.Context, qAndA models.QAndA) (models.QAndA, error) {
-	panic("not implemented") // TODO: implement
+func (c *CassandraQuestionsRepository) UpdateAnswer(ctx context.Context, qAndAUuid uuid.UUID, qAndA models.QAndA) (models.QAndA, error) {
+	panic("not implemented") //TODO: implement
 }
 
 func (c *CassandraQuestionsRepository) DeleteQAndA(context context.Context, qAndA models.QAndA) error {
-	panic("not implemented") // TODO: implement
+	panic("not implemented") //TODO: implement
 }
 
 func NewCassandraLikesRepository() CassandraLikesRepository {
@@ -492,7 +503,7 @@ func (c *CassandraLikesRepository) DeleteQAndA(ctx context.Context, qAndAUuid uu
 	return nil
 }
 
-func (c *CassandraQuestionsRepository) PostAnswerToFollowersHomefeed(context context.Context, qAndA models.QAndA, users []models.User) error {
+func (c *CassandraQuestionsRepository) PostAnswerToFollowersHomefeed(context context.Context, qAndA models.QAndA, users ...models.User) error {
 	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
 	defer cassandraConnectionClient.Put(cassandraClient)
 
@@ -679,7 +690,7 @@ func (c *CassandraUsersRepository) UpdateLoginDetails(_ context.Context, _ model
 	panic("not implemented") // TODO: Implement
 }
 
-func (c *CassandraUsersRepository) Follow(context context.Context, follower models.User, followed models.User) error {
+func (c *CassandraUsersRepository) Follow(context context.Context, follower string, followed string) error {
 	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
 	defer cassandraConnectionClient.Put(cassandraClient)
 
@@ -689,7 +700,7 @@ func (c *CassandraUsersRepository) Follow(context context.Context, follower mode
 		Cql: `UPDATE main.followers_of_user_counter SET followers = followers + 1 WHERE username = ?;`,
 		Values: &proto.Values{
 			Values: []*proto.Value{
-				&proto.Value{Inner: &proto.Value_String_{followed.Username}},
+				&proto.Value{Inner: &proto.Value_String_{followed}},
 			},
 		},
 	}
@@ -697,7 +708,7 @@ func (c *CassandraUsersRepository) Follow(context context.Context, follower mode
 		Cql: `UPDATE main.following_by_user_counter SET following = following + 1 WHERE username = ?;`,
 		Values: &proto.Values{
 			Values: []*proto.Value{
-				&proto.Value{Inner: &proto.Value_String_{follower.Username}},
+				&proto.Value{Inner: &proto.Value_String_{follower}},
 			},
 		},
 	}
@@ -706,30 +717,30 @@ func (c *CassandraUsersRepository) Follow(context context.Context, follower mode
 		Cql: followUserQuery,
 		Values: &proto.Values{
 			Values: []*proto.Value{
-				&proto.Value{Inner: &proto.Value_String_{followed.Username}},
-				&proto.Value{Inner: &proto.Value_String_{follower.Username}},
+				&proto.Value{Inner: &proto.Value_String_{followed}},
+				&proto.Value{Inner: &proto.Value_String_{follower}},
 			},
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to make the user %s follow the user %s %s", follower.Username, followed.Username, err)
+		return fmt.Errorf("failed to make the user %s follow the user %s %s", follower, followed, err)
 	}
 
 	_, err = cassandraClient.ExecuteBatch(&proto.Batch{
-		Type:    proto.Batch_COUNTER,
+		Type: proto.Batch_COUNTER,
 		Queries: []*proto.BatchQuery{
 			incrementFollowersTableBatchQuery,
 			incrementFollowingTableBatchQuery,
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to increment the counter table of followers and following")
+		return fmt.Errorf("failed to increment the counter table of followers and following %s", err)
 	}
 
 	return nil
 }
 
-func (c *CassandraUsersRepository) Unfollow(context context.Context, follower models.User, followed models.User) error {
+func (c *CassandraUsersRepository) Unfollow(context context.Context, follower string, followed string) error {
 	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
 	defer cassandraConnectionClient.Put(cassandraClient)
 
@@ -739,7 +750,7 @@ func (c *CassandraUsersRepository) Unfollow(context context.Context, follower mo
 		Cql: `UPDATE main.followers_of_user_counter SET followers = followers - 1 WHERE username = ?;`,
 		Values: &proto.Values{
 			Values: []*proto.Value{
-				&proto.Value{Inner: &proto.Value_String_{followed.Username}},
+				&proto.Value{Inner: &proto.Value_String_{followed}},
 			},
 		},
 	}
@@ -747,7 +758,7 @@ func (c *CassandraUsersRepository) Unfollow(context context.Context, follower mo
 		Cql: `UPDATE main.following_by_user_counter SET following = following - 1 WHERE username = ?;`,
 		Values: &proto.Values{
 			Values: []*proto.Value{
-				&proto.Value{Inner: &proto.Value_String_{follower.Username}},
+				&proto.Value{Inner: &proto.Value_String_{follower}},
 			},
 		},
 	}
@@ -756,17 +767,17 @@ func (c *CassandraUsersRepository) Unfollow(context context.Context, follower mo
 		Cql: followUserQuery,
 		Values: &proto.Values{
 			Values: []*proto.Value{
-				&proto.Value{Inner: &proto.Value_String_{followed.Username}},
-				&proto.Value{Inner: &proto.Value_String_{follower.Username}},
+				&proto.Value{Inner: &proto.Value_String_{followed}},
+				&proto.Value{Inner: &proto.Value_String_{follower}},
 			},
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to make the user %s follow the user %s %s", follower.Username, followed.Username, err)
+		return fmt.Errorf("failed to make the user %s follow the user %s %s", follower, followed, err)
 	}
 
 	_, err = cassandraClient.ExecuteBatch(&proto.Batch{
-		Type:    proto.Batch_COUNTER,
+		Type: proto.Batch_COUNTER,
 		Queries: []*proto.BatchQuery{
 			incrementFollowersTableBatchQuery,
 			incrementFollowingTableBatchQuery,
@@ -780,7 +791,31 @@ func (c *CassandraUsersRepository) Unfollow(context context.Context, follower mo
 }
 
 func (c *CassandraUsersRepository) SearchForUsername(context context.Context, username string) ([]models.User, error) {
-	panic("not implemented") // TODO: Implement
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	searchForUsernameQuery := `SELECT * FROM main.users WHERE username = ?;`
+	res, err :=	cassandraClient.ExecuteQuery(&proto.Query{
+		Cql: searchForUsernameQuery,
+		Values: &proto.Values{
+			Values: []*proto.Value{
+				 &proto.Value{Inner: &proto.Value_String_{username}},
+			},
+		},
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to search for username %s %s", err)
+	}
+
+	foundUsers := []models.User{}
+	for _, row := range res.GetResultSet().Rows {
+		foundUsers = append(foundUsers, models.User{
+			Username: row.Values[0].GetString_(),
+		})	
+	}
+
+	return foundUsers, nil
 }
 
 func (c *CassandraUsersRepository) FindFollowersOfUser(context context.Context, username string) ([]models.User, error) {
