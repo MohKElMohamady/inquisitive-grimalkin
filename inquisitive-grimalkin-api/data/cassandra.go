@@ -355,7 +355,31 @@ func (c *CassandraQuestionsRepository) AnswerQuestion(ctx context.Context, quest
 }
 
 func (c *CassandraQuestionsRepository) UpdateAnswer(ctx context.Context, qAndAUuid uuid.UUID, qAndA models.QAndA) (models.QAndA, error) {
-	panic("not implemented") //TODO: implement
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	cassandraCompliantQAndAUuid, err := googleUuidToCassandraUuid(qAndA.QuestionId)
+	if err != nil {
+		return models.QAndA{}, fmt.Errorf("failed to parse the id of the answer that needed to be updated %s", err)
+	}
+
+	deleteQAndAFromUserQuery := `UPDATE main.q_and_a_users SET answer = ? WHERE asked = ? AND question_id = ?;`
+	_, err = cassandraClient.ExecuteQuery(
+		&proto.Query{
+			Cql: deleteQAndAFromUserQuery,
+			Values: &proto.Values{
+				Values: []*proto.Value{
+					{Inner: &proto.Value_String_{qAndA.Asked}},
+					{Inner: &proto.Value_Uuid{cassandraCompliantQAndAUuid}},
+				},
+			},
+		},
+	)
+	if err != nil {
+		return models.QAndA{}, fmt.Errorf("failed to update the answer for the asked user %s", err)
+	}
+
+	return qAndA, nil
 }
 
 func (c *CassandraQuestionsRepository) DeleteQAndA(context context.Context, qAndA models.QAndA) error {
