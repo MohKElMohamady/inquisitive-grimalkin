@@ -359,7 +359,47 @@ func (c *CassandraQuestionsRepository) UpdateAnswer(ctx context.Context, qAndAUu
 }
 
 func (c *CassandraQuestionsRepository) DeleteQAndA(context context.Context, qAndA models.QAndA) error {
-	panic("not implemented") //TODO: implement
+	cassandraClient := cassandraConnectionClient.Get().(*client.StargateClient)
+	defer cassandraConnectionClient.Put(cassandraClient)
+
+	cassandraCompliantQAndAUuid, err := googleUuidToCassandraUuid(qAndA.QuestionId)
+	if err != nil {
+		return fmt.Errorf("failed to parse the id of the answer that needed to be deleted %s", err)
+	}
+
+	deleteQAndAFromUserQuery := `DELETE FROM main.q_and_a_users WHERE asked = ? AND question_id = ?;`
+	_, err = cassandraClient.ExecuteQuery(
+		&proto.Query{
+			Cql: deleteQAndAFromUserQuery,
+			Values: &proto.Values{
+				Values: []*proto.Value{
+					{Inner: &proto.Value_String_{qAndA.Asked}},
+					{Inner: &proto.Value_Uuid{cassandraCompliantQAndAUuid}},
+				},
+			},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to delete the q&a from the asked user table %s", err)
+	}
+
+	// Not sure if it is possible to say delete any of these followers
+	deleteQAndAFromFollowersTimelineQuery := `DELETE FROM main.q_and_a_followers WHERE follower = * AND question_id = ?;`
+	_, err = cassandraClient.ExecuteQuery(
+		&proto.Query{
+			Cql: deleteQAndAFromFollowersTimelineQuery,
+			Values: &proto.Values{
+				Values: []*proto.Value{
+					{Inner: &proto.Value_Uuid{cassandraCompliantQAndAUuid}},
+				},
+			},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to delete the q&a from the follower of the asked user table %s", err)
+	}
+
+	return nil
 }
 
 func NewCassandraLikesRepository() CassandraLikesRepository {
